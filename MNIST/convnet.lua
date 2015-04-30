@@ -13,14 +13,18 @@ require 'cudnn'
 require 'csvigo'
 require 'optim'
 
-if not os.execute("ls train.csv")
-    os.execute("wget https://www.kaggle.com/c/digit-recognizer/download/train.csv")
-if not os.execute("ls test.csv")
-    os.execute("wget https://www.kaggle.com/c/digit-recognizer/download/test.csv")
+if not os.execute("ls train.csv") then
+    os.execute("aws s3 cp s3://kpayets3/Data/Kaggle/MNIST/train.csv .")
+    os.execute("sed '1d' train.csv > tmpfile; mv tmpfile train.csv")
+end
+if not os.execute("ls test.csv") then
+    os.execute("aws s3 cp s3://kpayets3/Data/Kaggle/MNIST/test.csv .")
+    os.execute("sed '1d' test.csv > tmpfile; mv tmpfile test.csv")
+end
 
-train = csvigo.load{path = "train.csv", mode="raw", header=true}
+train = csvigo.load{path = "train.csv", mode="raw", header=false}
 train = torch.Tensor(train)
-test = csvigo.load{path = "test.csv", mode="raw", header=true}
+test = csvigo.load{path = "test.csv", mode="raw", header=false}
 test = torch.Tensor(test)
 
 trainData = {
@@ -30,9 +34,8 @@ trainData = {
     size = function() return (#trainData.data)[1] end
 }
 testData = {
-    
-    data = test[{{},{2,785}}],
-    labels = test[{{}, 1}],
+    data = test[{{},{1,784}}],
+    --labels = test[{{}, 1}],
     size = function() return (#testData.data)[1] end
 }
 
