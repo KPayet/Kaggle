@@ -63,7 +63,7 @@ model = nn.Sequential()
 model:add(nn.Reshape(1,28,28))
 
 -- 1st conv layer
-model:add(nn.SpatialConvolutionMM(1,16,5,5,1,1))
+model:add(nn.SpatialConvolutionMM(1,16,5,5,1,1,2))
 model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
@@ -73,19 +73,23 @@ model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
 -- 3rd conv layer
-model:add(nn.SpatialConvolutionMM(256,256,5,5))
+model:add(nn.SpatialConvolutionMM(256,2048,5,5))
 model:add(cudnn.ReLU())
-model:add(nn.Reshape(256))
+model:add(nn.SpatialMaxPooling(2,2))
+
+model:add(nn.Reshape(2048))
 model:add(nn.Dropout(0.5))
 
 -- Full connected ff net
-model:add(nn.Linear(256, 256))
+model:add(nn.Linear(2048, 1024))
 model:add(cudnn.ReLU())
 model:add(nn.Dropout(0.5))
 
---
+model:add(nn.Linear(1024, 512))
+model:add(cudnn.ReLU())
+model:add(nn.Dropout(0.5))
 
-model:add(nn.Linear(256, 128))
+model:add(nn.Linear(512, 128))
 model:add(cudnn.ReLU())
 model:add(nn.Dropout(0.5))
 
@@ -115,7 +119,7 @@ if model then
 end
 
 trsize = trainData:size()
-batchSize = 1
+batchSize = 128
 
 -- Training function
 function train(maxEntries)
@@ -205,17 +209,17 @@ function train(maxEntries)
    print("==> time to learn 1 sample = " .. (time*1000) .. 'ms')
 
    -- update logger/plot
-   trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
+   --trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
    
    -- print confusion matrix
    print(confusion)
    confusion:zero()
 
    -- save/log current net
-   local filename = paths.concat('./h2o_ffnn_model_'..epoch..'.net')
+   --local filename = paths.concat('./h2o_ffnn_model_'..epoch..'.net')
    
-   print('==> saving model to '..filename)
-   torch.save(filename, model)
+   --print('==> saving model to '..filename)
+   --torch.save(filename, model)
 
    -- next epoch
    epoch = epoch + 1
