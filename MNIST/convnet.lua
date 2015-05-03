@@ -63,16 +63,19 @@ model = nn.Sequential()
 model:add(nn.Reshape(1,28,28))
 
 -- 1st conv layer
+model:add(nn.SpatialDropout(0.1))
 model:add(nn.SpatialConvolutionMM(1,16,5,5,1,1,2))
 model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
 -- 2nd conv layer
+model:add(nn.SpatialDropout(0.5))
 model:add(nn.SpatialConvolutionMM(16,256,5,5,1,1,1))
 model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
 -- 3rd conv layer
+model:add(nn.SpatialDropout(0.5))
 model:add(nn.SpatialConvolutionMM(256,2048,5,5))
 model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
@@ -216,10 +219,12 @@ function train(maxEntries)
    confusion:zero()
 
    -- save/log current net
-   --local filename = paths.concat('./h2o_ffnn_model_'..epoch..'.net')
+   local filename = paths.concat('./mnist_convnet_model_big.net')
    
-   --print('==> saving model to '..filename)
-   --torch.save(filename, model)
+   print('==> saving model to '..filename)
+   torch.save(filename, model)
+
+   os.execute("aws s3 cp ./mnist_convnet_model_big.net s3://kpayets3/mnist_convnet_model_big.net")
 
    -- next epoch
    epoch = epoch + 1
