@@ -69,32 +69,32 @@ model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
 -- 2nd conv layer
-model:add(nn.SpatialDropout(0.5))
+model:add(nn.SpatialDropout(0.1))
 model:add(nn.SpatialConvolutionMM(16,256,5,5,1,1,1))
 model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
 -- 3rd conv layer
-model:add(nn.SpatialDropout(0.5))
+model:add(nn.SpatialDropout(0.1))
 model:add(nn.SpatialConvolutionMM(256,2048,5,5))
 model:add(cudnn.ReLU())
 model:add(nn.SpatialMaxPooling(2,2))
 
 model:add(nn.Reshape(2048))
-model:add(nn.Dropout(0.5))
+model:add(nn.Dropout(0.1))
 
 -- Full connected ff net
 model:add(nn.Linear(2048, 1024))
 model:add(cudnn.ReLU())
-model:add(nn.Dropout(0.5))
+model:add(nn.Dropout(0.4))
 
 model:add(nn.Linear(1024, 512))
 model:add(cudnn.ReLU())
-model:add(nn.Dropout(0.5))
+model:add(nn.Dropout(0.4))
 
 model:add(nn.Linear(512, 128))
 model:add(cudnn.ReLU())
-model:add(nn.Dropout(0.5))
+model:add(nn.Dropout(0.4))
 
 --Output layer
 model:add(nn.Linear(128, noutputs))
@@ -122,7 +122,7 @@ if model then
 end
 
 trsize = trainData:size()
-batchSize = 128
+batchSize = 1
 
 -- Training function
 function train(maxEntries)
@@ -219,12 +219,12 @@ function train(maxEntries)
    confusion:zero()
 
    -- save/log current net
-   local filename = paths.concat('./mnist_convnet_model_big.net')
+   local filename = paths.concat('./mnist_convnet_model_big_2.net')
    
    print('==> saving model to '..filename)
    torch.save(filename, model)
 
-   os.execute("aws s3 cp ./mnist_convnet_model_big.net s3://kpayets3/mnist_convnet_model_big.net")
+   os.execute("aws s3 cp ./mnist_convnet_model_big_2.net s3://kpayets3/mnist_convnet_model_big_2.net")
 
    -- next epoch
    epoch = epoch + 1
