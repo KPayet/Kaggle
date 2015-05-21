@@ -122,7 +122,7 @@ if model then
 end
 
 trsize = trainData:size()
-batchSize = 1
+batchSize = 24
 
 -- Training function
 function train(maxEntries)
@@ -148,16 +148,21 @@ function train(maxEntries)
       xlua.progress(t, maxEntries)
 
       -- create mini batch
-      local inputs = {}
-      local targets = {}
-      for i = t,math.min(t+batchSize-1,maxEntries) do
-	 -- load new sample
-	 local input = trainData.data[shuffle[i]]:double()
-	 local target = trainData.labels[shuffle[i]]
-	 table.insert(inputs, input)
-	 table.insert(targets, target)
-      end
-	
+      local inputs = torch.Tensor(batchSize,784)
+      local targets = torch.Tensor(batchSize)
+      
+      local k = 1
+      for i = t,math.min(t+batchSize-1,trainData:size()) do
+         -- load new sample
+         local sample = trainData.data[i]
+         local input = trainData.data[i]
+         local target = trainData.labels[i]
+         inputs[k] = input
+	 if target==0 then target=10 end
+         targets[k] = target
+         k = k + 1
+      end      
+      
       -- create closure to evaluate f(X) and df/dX
       local feval = function(x)
 		       -- get new parameters
@@ -170,37 +175,28 @@ function train(maxEntries)
 
 		       -- f is the average of all criterions
 		       local f = 0
-		
-		       -- evaluate function for complete mini batch
-		       for i = 1,#inputs do
-			  -- estimate f
-			  local output = model:forward(inputs[i]:cuda())
-			  output = output:double()
-			  if targets[i]==0 then targets[i]=10 end
-			  
-			  local err = criterion:forward(output, targets[i])
-			  f = f + err
-			  
-			  -- estimate df/dW
-			  local df_do = criterion:backward(output, targets[i])
-			  model:backward(inputs[i]:cuda(), df_do:cuda())
+                       -- evaluate function for complete mini batch
+         	       local outputs = model:forward(inputs:cuda())
+         	       outputs = outputs:double()
+		       local f = criterion:forward(outputs, targets)
 
-			  -- update confusion
-			  confusion:add(output, targets[i])
-		       end
+         	       -- estimate df/dW
+                       local df_do = criterion:backward(outputs, targets)
+        	       model:backward(inputs:cuda(), df_do:cuda())
+                       
+                                -- update confusion
+         	       for i = 1,batchSize do
+                       	  confusion:add(outputs[i], targets[i])
+                       end	
 			
-		       -- normalize gradients and f(X)
-		       gradParameters:div(#inputs)
-		       f = f/#inputs
-
 		       -- return f and df/dX
 		       return f,gradParameters
-		    end
+    end
 
-	config = config or {learningRate = 1e-3,
+	config = config or {learningRate = 1e-2,
 			 weightDecay = 0,
 			 momentum = 0,
-			 learningRateDecay = 5e-7}
+			 learningRateDecay = 0}
 	optim.sgd(feval, parameters, config)
 	
 
