@@ -66,19 +66,19 @@ model:add(nn.Reshape(1,28,28))
 model:add(nn.SpatialDropout(0.1))
 model:add(nn.SpatialConvolutionMM(1,16,5,5,1,1,2))
 model:add(cudnn.ReLU())
-model:add(nn.SpatialMaxPooling(2,2))
+model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 2nd conv layer
 model:add(nn.SpatialDropout(0.1))
 model:add(nn.SpatialConvolutionMM(16,256,5,5,1,1,1))
 model:add(cudnn.ReLU())
-model:add(nn.SpatialMaxPooling(2,2))
+model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 3rd conv layer
 model:add(nn.SpatialDropout(0.1))
 model:add(nn.SpatialConvolutionMM(256,2048,5,5))
 model:add(cudnn.ReLU())
-model:add(nn.SpatialMaxPooling(2,2))
+model:add(cudnn.SpatialMaxPooling(2,2))
 
 model:add(nn.Reshape(2048))
 model:add(nn.Dropout(0.1))
@@ -105,6 +105,7 @@ model:cuda()
 --Loss function
 
 criterion = nn.ClassNLLCriterion()
+criterion:cuda()
 
 -- Training -- This part is an almost copy/paste of http://code.madbits.com/wiki/doku.php?id=tutorial_supervised_4_train
 
@@ -122,7 +123,7 @@ if model then
 end
 
 trsize = trainData:size()
-batchSize = 24
+batchSize = 128
 
 -- Training function
 function train(maxEntries)
@@ -176,13 +177,15 @@ function train(maxEntries)
 		       -- f is the average of all criterions
 		       local f = 0
                        -- evaluate function for complete mini batch
-         	       local outputs = model:forward(inputs:cuda())
-         	       outputs = outputs:double()
+		       inputs = inputs:cuda()
+	 	       targets = targets:cuda()
+         	       local outputs = model:forward(inputs)
+         	       --outputs = outputs:double()
 		       local f = criterion:forward(outputs, targets)
 
          	       -- estimate df/dW
                        local df_do = criterion:backward(outputs, targets)
-        	       model:backward(inputs:cuda(), df_do:cuda())
+        	       model:backward(inputs, df_do)
                        
                                 -- update confusion
          	       for i = 1,batchSize do
@@ -193,7 +196,7 @@ function train(maxEntries)
 		       return f,gradParameters
     end
 
-	config = config or {learningRate = 1e-2,
+	config = config or {learningRate = 1e-4,
 			 weightDecay = 0,
 			 momentum = 0,
 			 learningRateDecay = 0}
