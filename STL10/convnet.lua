@@ -16,26 +16,20 @@ require 'optim'
 matio = require 'matio'
 
 train = matio.load("./stlTrainSubset.mat")
-train.trainImages = train.trainImages:transpose(1,4)
-train.trainImages = train.trainImages:transpose(2,3)
-train.trainImages = train.trainImages:transpose(3,4)
-
-train = matio.load("./stlTrainSubset.mat")
-train.trainImages = train.trainImages:transpose(1,4)
-train.trainImages = train.trainImages:transpose(2,3)
-train.trainImages = train.trainImages:transpose(3,4)
-
 trainData = {
-    
-    data = train[{{},{2,785}}],
-    labels = train[{{}, 1}],
+    data = train.trainImages,
+    labels = train.trainLabels[{{},1}],
     size = function() return (#trainData.data)[1] end
 }
+trainData.data = trainData.data:transpose(1,4):transpose(2,3):transpose(3,4)
+
+test = matio.load("./stlTestSubset.mat")
 testData = {
-    data = test[{{},{1,784}}],
-    --labels = test[{{}, 1}],
+    data = test.testImages,
+    labels = test.testLabels[{{},1}],
     size = function() return (#testData.data)[1] end
 }
+testData.data = testData.data:transpose(1,4):transpose(2,3):transpose(3,4)
 
 -- Normalize features globally
 
