@@ -13,19 +13,17 @@ require 'cudnn'
 require 'csvigo'
 require 'optim'
 
-if not os.execute("ls train.csv") then
-    os.execute("aws s3 cp s3://kpayets3/Data/Kaggle/MNIST/train.csv .")
-    os.execute("sed '1d' train.csv > tmpfile; mv tmpfile train.csv")
-end
-if not os.execute("ls test.csv") then
-    os.execute("aws s3 cp s3://kpayets3/Data/Kaggle/MNIST/test.csv .")
-    os.execute("sed '1d' test.csv > tmpfile; mv tmpfile test.csv")
-end
+matio = require 'matio'
 
-train = csvigo.load{path = "train.csv", mode="raw", header=false}
-train = torch.Tensor(train)
-test = csvigo.load{path = "test.csv", mode="raw", header=false}
-test = torch.Tensor(test)
+train = matio.load("./stlTrainSubset.mat")
+train.trainImages = train.trainImages:transpose(1,4)
+train.trainImages = train.trainImages:transpose(2,3)
+train.trainImages = train.trainImages:transpose(3,4)
+
+train = matio.load("./stlTrainSubset.mat")
+train.trainImages = train.trainImages:transpose(1,4)
+train.trainImages = train.trainImages:transpose(2,3)
+train.trainImages = train.trainImages:transpose(3,4)
 
 trainData = {
     
@@ -59,42 +57,53 @@ print(  cutorch.getDeviceProperties(cutorch.getDevice()) )
 -- Build model
 
 model = nn.Sequential()
--- input back to image
-model:add(nn.Reshape(1,28,28))
 
 -- 1st conv layer
-model:add(nn.SpatialDropout(0.1))
-model:add(nn.SpatialConvolutionMM(1,16,5,5,1,1,2))
+model:add(nn.SpatialConvolutionMM(3,48,11,11,1,1,0))
 model:add(cudnn.ReLU())
-model:add(nn.SpatialMaxPooling(2,2))
+model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 2nd conv layer
-model:add(nn.SpatialDropout(0.1))
-model:add(nn.SpatialConvolutionMM(16,256,5,5,1,1,1))
+--model:add(nn.SpatialDropout(0.1))
+model:add(nn.SpatialConvolutionMM(48,256,10,10,1,1,0))
 model:add(cudnn.ReLU())
-model:add(nn.SpatialMaxPooling(2,2))
+model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 3rd conv layer
-model:add(nn.SpatialDropout(0.1))
-model:add(nn.SpatialConvolutionMM(256,2048,5,5))
+--model:add(nn.SpatialDropout(0.1))
+model:add(nn.SpatialConvolutionMM(256,1024,8,8))
 model:add(cudnn.ReLU())
-model:add(nn.SpatialMaxPooling(2,2))
+model:add(cudnn.SpatialMaxPooling(2,2))
+
+-- 4th conv layer
+model:add(nn.SpatialConvolutionMM(1024,2048,6,6))
+model:add(cudnn.ReLU())
+model:add(cudnn.SpatialMaxPooling(2,2))
+
+-- 5th conv layer
+model:add(nn.SpatialConvolutionMM(2048,2048,5,5))
+model:add(cudnn.ReLU())
+model:add(cudnn.SpatialMaxPooling(2,2))
+
+-- 6th conv layer
+model:add(nn.SpatialConvolutionMM(2048,2048,3,3))
+model:add(cudnn.ReLU())
 
 model:add(nn.Reshape(2048))
-model:add(nn.Dropout(0.1))
+model:add(nn.Dropout(0.5))
 
 -- Full connected ff net
 model:add(nn.Linear(2048, 1024))
 model:add(cudnn.ReLU())
-model:add(nn.Dropout(0.4))
+model:add(nn.Dropout(0.5))
 
 model:add(nn.Linear(1024, 512))
 model:add(cudnn.ReLU())
-model:add(nn.Dropout(0.4))
+model:add(nn.Dropout(0.5))
 
 model:add(nn.Linear(512, 128))
 model:add(cudnn.ReLU())
-model:add(nn.Dropout(0.4))
+model:add(nn.Dropout(0.5))
 
 --Output layer
 model:add(nn.Linear(128, noutputs))
@@ -105,6 +114,7 @@ model:cuda()
 --Loss function
 
 criterion = nn.ClassNLLCriterion()
+criterion:cuda()
 
 -- Training -- This part is an almost copy/paste of http://code.madbits.com/wiki/doku.php?id=tutorial_supervised_4_train
 
@@ -122,7 +132,7 @@ if model then
 end
 
 trsize = trainData:size()
-batchSize = 1
+batchSize = 128
 
 -- Training function
 function train(maxEntries)
@@ -148,16 +158,21 @@ function train(maxEntries)
       xlua.progress(t, maxEntries)
 
       -- create mini batch
-      local inputs = {}
-      local targets = {}
-      for i = t,math.min(t+batchSize-1,maxEntries) do
-	 -- load new sample
-	 local input = trainData.data[shuffle[i]]:double()
-	 local target = trainData.labels[shuffle[i]]
-	 table.insert(inputs, input)
-	 table.insert(targets, target)
-      end
-	
+      local inputs = torch.Tensor(batchSize,784)
+      local targets = torch.Tensor(batchSize)
+      
+      local k = 1
+      for i = t,math.min(t+batchSize-1,trainData:size()) do
+         -- load new sample
+         local sample = trainData.data[i]
+         local input = trainData.data[i]
+         local target = trainData.labels[i]
+         inputs[k] = input
+	 if target==0 then target=10 end
+         targets[k] = target
+         k = k + 1
+      end      
+      
       -- create closure to evaluate f(X) and df/dX
       local feval = function(x)
 		       -- get new parameters
@@ -170,37 +185,30 @@ function train(maxEntries)
 
 		       -- f is the average of all criterions
 		       local f = 0
-		
-		       -- evaluate function for complete mini batch
-		       for i = 1,#inputs do
-			  -- estimate f
-			  local output = model:forward(inputs[i]:cuda())
-			  output = output:double()
-			  if targets[i]==0 then targets[i]=10 end
-			  
-			  local err = criterion:forward(output, targets[i])
-			  f = f + err
-			  
-			  -- estimate df/dW
-			  local df_do = criterion:backward(output, targets[i])
-			  model:backward(inputs[i]:cuda(), df_do:cuda())
+                       -- evaluate function for complete mini batch
+		       inputs = inputs:cuda()
+	 	       targets = targets:cuda()
+         	       local outputs = model:forward(inputs)
+         	       --outputs = outputs:double()
+		       local f = criterion:forward(outputs, targets)
 
-			  -- update confusion
-			  confusion:add(output, targets[i])
-		       end
+         	       -- estimate df/dW
+                       local df_do = criterion:backward(outputs, targets)
+        	       model:backward(inputs, df_do)
+                       
+                                -- update confusion
+         	       for i = 1,batchSize do
+                       	  confusion:add(outputs[i], targets[i])
+                       end	
 			
-		       -- normalize gradients and f(X)
-		       gradParameters:div(#inputs)
-		       f = f/#inputs
-
 		       -- return f and df/dX
 		       return f,gradParameters
-		    end
+    end
 
-	config = config or {learningRate = 1e-3,
+	config = config or {learningRate = 1e-4,
 			 weightDecay = 0,
 			 momentum = 0,
-			 learningRateDecay = 5e-7}
+			 learningRateDecay = 0}
 	optim.sgd(feval, parameters, config)
 	
 
