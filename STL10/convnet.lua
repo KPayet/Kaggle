@@ -12,6 +12,7 @@ require 'cunn'
 require 'cudnn'
 require 'csvigo'
 require 'optim'
+require 'image'
 
 matio = require 'matio'
 
@@ -31,18 +32,50 @@ testData = {
 }
 testData.data = testData.data:transpose(1,4):transpose(2,3):transpose(3,4)
 
--- Normalize features globally
+print '==> preprocessing data: colorspace RGB -> YUV'
+ for i = 1,trainData:size() do
+    trainData.data[i] = image.rgb2yuv(trainData.data[i])
+ end
+ for i = 1,testData:size() do
+    testData.data[i] = image.rgb2yuv(testData.data[i])
+end
 
-mean = trainData.data:mean()
-std = trainData.data:std()
+channels = {'y','u','v'}
 
-trainData.data:add(-mean)
-trainData.data:div(std)
+print '==> preprocessing data: normalize each feature (channel) globally'
+mean = {}
+std = {}
+for i,channel in ipairs(channels) do
+   -- normalize each channel globally:
+   mean[i] = trainData.data[{ {},i,{},{} }]:mean()
+    std[i] = trainData.data[{ {},i,{},{} }]:std()
+   trainData.data[{ {},i,{},{} }]:add(-mean[i])
+   trainData.data[{ {},i,{},{} }]:div(std[i])
+end
 
-testData.data:add(-mean)
-testData.data:div(std)
+-- Normalize test data, using the training means/stds
+for i,channel in ipairs(channels) do
+   -- normalize each channel globally:
+   testData.data[{ {},i,{},{} }]:add(-mean[i])
+   testData.data[{ {},i,{},{} }]:div(std[i])
+end
 
-noutputs = 10
+-- Local normalization
+print '==> preprocessing data: normalize Y (luminance) channel locally'
+-- Define the normalization neighborhood:
+neighborhood = image.gaussian1D(7)
+-- Define our local normalization operator (It is an actual nn module,
+-- which could be inserted into a trainable model):
+normalization = nn.SpatialContrastiveNormalization(1, neighborhood):double()
+-- Normalize all Y channels locally:
+for i = 1,trainData:size() do
+   trainData.data[{ i,{1},{},{} }] = normalization(trainData.data[{ i,{1},{},{} }])
+end
+for i = 1,testData:size() do
+   testData.data[{ i,{1},{},{} }] = normalization(testData.data[{ i,{1},{},{} }])
+end
+
+noutputs = 4
 
 -- Init GPU
 
@@ -53,36 +86,28 @@ print(  cutorch.getDeviceProperties(cutorch.getDevice()) )
 model = nn.Sequential()
 
 -- 1st conv layer
-model:add(nn.SpatialConvolutionMM(3,48,11,11,1,1,0))
+model:add(nn.SpatialConvolutionMM(3,48,9,9,1,1,0))
 model:add(cudnn.ReLU())
 model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 2nd conv layer
 --model:add(nn.SpatialDropout(0.1))
-model:add(nn.SpatialConvolutionMM(48,256,10,10,1,1,0))
+model:add(nn.SpatialConvolutionMM(48,256,5,5,1,1,0))
 model:add(cudnn.ReLU())
 model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 3rd conv layer
 --model:add(nn.SpatialDropout(0.1))
-model:add(nn.SpatialConvolutionMM(256,1024,8,8))
+model:add(nn.SpatialConvolutionMM(256,1024,5,5))
 model:add(cudnn.ReLU())
 model:add(cudnn.SpatialMaxPooling(2,2))
 
 -- 4th conv layer
-model:add(nn.SpatialConvolutionMM(1024,2048,6,6))
-model:add(cudnn.ReLU())
-model:add(cudnn.SpatialMaxPooling(2,2))
+model:add(nn.SpatialConvolutionMM(1024,2048,4,4))
+--model:add(cudnn.ReLU())
+--model:add(cudnn.SpatialMaxPooling(2,2))
 
--- 5th conv layer
-model:add(nn.SpatialConvolutionMM(2048,2048,5,5))
-model:add(cudnn.ReLU())
-model:add(cudnn.SpatialMaxPooling(2,2))
-
--- 6th conv layer
-model:add(nn.SpatialConvolutionMM(2048,2048,3,3))
-model:add(cudnn.ReLU())
-
+-- Transition to fully connected net
 model:add(nn.Reshape(2048))
 model:add(nn.Dropout(0.5))
 
@@ -112,7 +137,7 @@ criterion:cuda()
 
 -- Training -- This part is an almost copy/paste of http://code.madbits.com/wiki/doku.php?id=tutorial_supervised_4_train
 
-classes = {'1','2','3','4','5','6','7','8','9','0'}
+classes = {'1','2','3','4'}
 
 -- This matrix records the current confusion across classes
 confusion = optim.ConfusionMatrix(classes)
@@ -152,7 +177,7 @@ function train(maxEntries)
       xlua.progress(t, maxEntries)
 
       -- create mini batch
-      local inputs = torch.Tensor(batchSize,784)
+      local inputs = torch.Tensor(batchSize,3,64,64)
       local targets = torch.Tensor(batchSize)
       
       local k = 1
@@ -162,7 +187,7 @@ function train(maxEntries)
          local input = trainData.data[i]
          local target = trainData.labels[i]
          inputs[k] = input
-	 if target==0 then target=10 end
+	 --if target==0 then target=10 end
          targets[k] = target
          k = k + 1
       end      
@@ -221,12 +246,12 @@ function train(maxEntries)
    confusion:zero()
 
    -- save/log current net
-   local filename = paths.concat('./mnist_convnet_model_big_2.net')
+   --local filename = paths.concat('./mnist_convnet_model_big_2.net')
    
-   print('==> saving model to '..filename)
-   torch.save(filename, model)
+   --print('==> saving model to '..filename)
+   --torch.save(filename, model)
 
-   os.execute("aws s3 cp ./mnist_convnet_model_big_2.net s3://kpayets3/mnist_convnet_model_big_2.net")
+   --os.execute("aws s3 cp ./mnist_convnet_model_big_2.net s3://kpayets3/mnist_convnet_model_big_2.net")
 
    -- next epoch
    epoch = epoch + 1
@@ -256,7 +281,7 @@ function test(maxEntries)
       -- get new sample
       local input = testData.data[t]:double()
       local target = testData.labels[t]
-      if target == 0 then target = 10 end
+      --if target == 0 then target = 10 end
 
       -- test sample
       local pred_gpu = model:forward(input:cuda())
@@ -270,7 +295,7 @@ function test(maxEntries)
    print("==> time to test 1 sample = " .. (time*1000) .. 'ms')
 
    -- update log/plot
-   testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   --testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
 
    -- print confusion matrix
    print(confusion)
